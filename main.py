@@ -10,12 +10,22 @@ import asyncio
 import aiohttp
 import aiofiles
 import uuid
+import json
 links = set()
 
-password = sys.argv[4]
-username = sys.argv[5]
-video_fetch = sys.argv[2] == "yes"
-page_url = sys.argv[1]
+
+def configure():
+    config = {}
+    config['password'] = sys.argv[4]
+    config['username'] = sys.argv[3]
+    config['video_fetch'] = sys.argv[2] == "yes"
+    config['page_url'] = sys.argv[1]
+    config['is_single'] = config['page_url'].find('/p/') != -1
+    print(config)
+    return config
+
+config = configure()
+
 def find_links(driver):
     links_els = driver.find_elements_by_xpath("//a[starts-with(@href, '/p/')]")
     for elem in links_els:
@@ -53,9 +63,9 @@ def login(driver):
 
     ActionChains(driver)\
         .move_to_element(user).click()\
-        .send_keys(username)\
+        .send_keys(config['username'])\
         .move_to_element(passw).click()\
-        .send_keys(password)\
+        .send_keys(config['password'])\
         .perform()
 
     login_button_ = driver.find_element_by_xpath(
@@ -86,7 +96,7 @@ async def proceed_link(page_link, driver):
 
     while True:
         imgs = driver.find_elements_by_css_selector(".ltEKP img.FFVAD")
-        if video_fetch:
+        if config['video_fetch']:
             videos = []
             previews = []
 
@@ -108,34 +118,41 @@ async def proceed_link(page_link, driver):
             right.click()
         except:
             break
+    print("proceed_link")        
     print(images_links)
+    print(videos_links)
     first_bank = asyncio.gather(*[download_file(file, '.jpg') for file in images_links])    
     second_bank = asyncio.gather(*[download_file(file, '.mp4') for file in videos_links])
     await first_bank 
     await second_bank
     
 async def main():
+    
     driver = webdriver.Chrome()
     login(driver)
     time.sleep(5)
-    driver.get(page_url)
+    if config['is_single']:
 
-    total_expecting = driver.find_element_by_css_selector('.g47SY').text
-    
-    infinite_scroll(driver)
+        if config['video_fetch']:
+            driver.delete_all_cookies()
 
-    if video_fetch:
-        driver.delete_all_cookies()
-    
-    print(str(len(links))+"/"+total_expecting)
+        await proceed_link(config['page_url'], driver)
 
-    #for link in links:
-    #    proceed_link(link, driver)
-    await asyncio.gather(*[proceed_link(link, driver) for link in links])
+    else :
+        driver.get(config['page_url'])
+        total_expecting = driver.find_element_by_css_selector('.g47SY').text
+       
+        infinite_scroll(driver)
+
+        if config['video_fetch']:
+            driver.delete_all_cookies()
+        
+        print(str(len(links))+"/"+total_expecting)
+        await asyncio.gather(*[proceed_link(link, driver) for link in links])
    
     print("DONE!")
     
    
-
+asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 asyncio.run(main())
 
