@@ -11,8 +11,6 @@ import aiohttp
 import aiofiles
 import uuid
 import json
-links = set()
-
 
 def configure():
     config = {}
@@ -26,14 +24,16 @@ def configure():
 
 config = configure()
 
-def find_links(driver):
+def find_links(driver, links):
     links_els = driver.find_elements_by_xpath("//a[starts-with(@href, '/p/')]")
     for elem in links_els:
-        links.add(elem.get_attribute("href"))
-        print(elem.get_attribute("href"))
+        if(len(sys.argv) >= 6 and len(links) >= int(sys.argv[5])):
+            return False
+        push_link(links, elem.get_attribute("href"))
+        print(elem.get_attribute("href"))      
+    return True
 
-
-def infinite_scroll(driver):
+def infinite_scroll(driver, links):
     SCROLL_PAUSE_TIME = 1.25
     last_height = driver.execute_script("return document.body.scrollHeight")
 
@@ -41,7 +41,9 @@ def infinite_scroll(driver):
         # Scroll down to bottom
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
         time.sleep(SCROLL_PAUSE_TIME)
-        find_links(driver)
+        if(not(find_links(driver, links))):
+            return
+       
         # Wait to load page
         time.sleep(SCROLL_PAUSE_TIME)
 
@@ -53,8 +55,9 @@ def infinite_scroll(driver):
 
 def login(driver):
     driver.get('https://www.instagram.com')
-    wait = WebDriverWait(driver, 10)
     driver.find_element_by_css_selector('.rgFsT')
+    wait = WebDriverWait(driver, 10)
+    
     wait.until(EC.presence_of_element_located((By.CLASS_NAME, "KPnG0")))  # util login page appear
 
     user = driver.find_element_by_name("username")
@@ -72,10 +75,10 @@ def login(driver):
         "//form[@class='HmktE']/div/div[3]/button")
     login_button_.click()
 
-async def download_file(file, ext):
+async def download_file(_file, ext):
       
     async with aiohttp.ClientSession() as s:
-            resp = await s.get(file)
+            resp = await s.get(_file)
             if resp.status == 200:
                 f = await aiofiles.open('D:/Applications/p/done/' + str(uuid.uuid4()) + ext, mode='wb')
                 out = await resp.read()
@@ -87,6 +90,10 @@ async def proceed_link(page_link, driver):
     driver.get(page_link)
     images_links = set()
     videos_links = set()
+    wait = WebDriverWait(driver, 10)
+    
+    wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, ".ltEKP img.FFVAD, .tWeCl")))
+
     try:
         right = driver.find_element_by_css_selector(".coreSpriteRightChevron")
     except:
@@ -96,16 +103,11 @@ async def proceed_link(page_link, driver):
 
     while True:
         imgs = driver.find_elements_by_css_selector(".ltEKP img.FFVAD")
+        print(imgs)
         if config['video_fetch']:
-            videos = []
-            previews = []
-
-            try:
-                videos = driver.find_elements_by_css_selector(".tWeCl")
-                previews = driver.find_elements_by_css_selector("._8jZFn")
-            except:
-                pass
-            
+            videos = driver.find_elements_by_css_selector(".tWeCl")
+            previews = driver.find_elements_by_css_selector("._8jZFn")
+          
             for preview in previews:
                 images_links.add(preview.get_attribute("src"))
             for video in videos:
@@ -118,16 +120,26 @@ async def proceed_link(page_link, driver):
             right.click()
         except:
             break
-    print("proceed_link")        
+    print("proceed_link "+page_link)        
     print(images_links)
     print(videos_links)
-    first_bank = asyncio.gather(*[download_file(file, '.jpg') for file in images_links])    
-    second_bank = asyncio.gather(*[download_file(file, '.mp4') for file in videos_links])
-    await first_bank 
-    await second_bank
-    
+    await asyncio.gather(*[download_file(_file, '.jpg') for _file in images_links])    
+    await asyncio.gather(*[download_file(_file, '.mp4') for _file in videos_links])
+   
+def push_link(links, link):
+    if(len(sys.argv)>=6):
+        links.append(link)
+        links = list(dict.fromkeys(links))
+    else :
+        links.add(link)
+   
+def init_links():
+    if(len(sys.argv)>=6):
+        return list()
+    else :
+        return set()
+
 async def main():
-    
     driver = webdriver.Chrome()
     login(driver)
     time.sleep(5)
@@ -139,15 +151,17 @@ async def main():
         await proceed_link(config['page_url'], driver)
 
     else :
+        
         driver.get(config['page_url'])
         total_expecting = driver.find_element_by_css_selector('.g47SY').text
+        links = init_links()
+        infinite_scroll(driver, links)
        
-        infinite_scroll(driver)
-
         if config['video_fetch']:
             driver.delete_all_cookies()
         
         print(str(len(links))+"/"+total_expecting)
+
         await asyncio.gather(*[proceed_link(link, driver) for link in links])
    
     print("DONE!")
